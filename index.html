@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>雨夜便利店</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&family=Noto+Serif+JP:wght@700;900&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="loading">
+  <div class="load-title">雨夜のコンビニ</div>
+  <div class="load-sub">正在搭建街道、貨架與雨滴…</div>
+  <div class="load-bar"><i id="loadFill"></i></div>
+</div>
+
+<div id="start" class="hidden">
+  <div class="start-card">
+    <div class="start-jp">雨夜のコンビニ</div>
+    <div class="start-zh">雨夜便利店 · 即時 3D 場景</div>
+    <ul class="keys">
+      <li><b>W A S D</b> / 方向鍵　移動</li>
+      <li><b>Shift</b>　奔跑（按住）</li>
+      <li><b>滑鼠拖曳</b>　旋轉視角　<b>滾輪</b>　縮放</li>
+      <li><b>M</b> 音效　<b>Q</b> 畫質　<b>H</b> 隱藏介面</li>
+    </ul>
+    <button id="startBtn">點擊進入</button>
+  </div>
+</div>
+
+<div id="hud" class="hidden">
+  <div class="hud-title"><span>雨夜のコンビニ</span><em id="hudPlace">街道</em></div>
+  <div class="hud-keys">WASD 移動 · Shift 奔跑 · 拖曳 視角 · M 音效 · Q 畫質 · H 隱藏</div>
+  <div class="hud-stat" id="hudStat"></div>
+</div>
+
+<div id="bubbles"></div>
+<div id="toast"></div>
+
+<div id="joy" class="hidden"><div id="joyKnob"></div></div>
+<button id="runBtn" class="hidden">跑</button>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -40,13 +40,14 @@ async function init() {
   await progress(0.05);
   const canvas = $('c');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-  // fixed "smooth" quality: lower render scale, no shadow maps, lighter reflections and rain
-  const quality = { pr: 0.85 };
+  // high quality by default; Q toggles the lighter "smooth" preset
+  const quality = { level: 'high', pr: Math.min(devicePixelRatio, 1.5) };
   renderer.setPixelRatio(quality.pr);
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
-  renderer.shadowMap.enabled = false;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   RectAreaLightUniformsLib.init();
 
   const scene = new THREE.Scene();
@@ -68,7 +69,7 @@ async function init() {
   scene.environmentIntensity = 0.45;
   scene.add(new THREE.HemisphereLight(0x2a3b5c, 0x07080c, 0.55));
 
-  const refl = new PlanarReflection(renderer, 0.3);
+  const refl = new PlanarReflection(renderer, 0.5);
   const street = buildStreet(scene, refl);
   T('street');
   await progress(0.35);
@@ -79,7 +80,7 @@ async function init() {
   const counter = buildCounter(scene);
   T('interior');
   await progress(0.65);
-  const rain = new Rain(scene, { count: 7000, splashCount: 1000 });
+  const rain = new Rain(scene);
   const audio = new AudioFX();
 
   // speech bubbles
@@ -167,10 +168,20 @@ async function init() {
   };
   let toastT = 0;
   const toast = (msg, t = 2) => { $('toast').textContent = msg; $('toast').classList.add('show'); toastT = t; };
+  const setQuality = (lvl) => {
+    quality.level = lvl;
+    quality.pr = lvl === 'high' ? Math.min(devicePixelRatio, 1.5) : 0.85;
+    refl.scale = lvl === 'high' ? 0.5 : 0.3;
+    rain.streaks.geometry.instanceCount = lvl === 'high' ? 16000 : 7000;
+    renderer.shadowMap.enabled = lvl === 'high';
+    scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach((m) => (m.needsUpdate = true)); } });
+    resize(); toast(lvl === 'high' ? '畫質：高' : '畫質：流暢');
+  };
   let hudHidden = false, muted = false, paid = false;
   addEventListener('keydown', (e) => {
     if (e.code === 'KeyH') { hudHidden = !hudHidden; $('hud').classList.toggle('hidden', hudHidden); }
     if (e.code === 'KeyM') { muted = !muted; audio.setEnabled(!muted); toast(muted ? '音效：關' : '音效：開'); }
+    if (e.code === 'KeyQ') setQuality(quality.level === 'high' ? 'low' : 'high');
     if (e.code === 'KeyE' && nearCounter() && !paid) {
       paid = true; audio.register(); bag.visible = true;
       say(npcs.clerk, 'ありがとうございます！', 2.4); npcs.clerk.bowT = 1.0;
@@ -249,7 +260,7 @@ async function init() {
     post.render(t);
 
     fpsAcc += dt; fpsN++;
-    if (fpsAcc > 0.5) { $('hudStat').textContent = `${Math.round(fpsN / fpsAcc)} fps`; fpsAcc = 0; fpsN = 0; }
+    if (fpsAcc > 0.5) { $('hudStat').textContent = `${Math.round(fpsN / fpsAcc)} fps · ${quality.level === 'high' ? '高畫質' : '流暢'}`; fpsAcc = 0; fpsN = 0; }
   }
   // keep the loop alive even if one frame throws
   let errShown = false;

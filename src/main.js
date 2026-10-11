@@ -17,7 +17,11 @@ import { createPost } from './post.js';
 import { loadPhotoAssets, applyPhotoAssets } from './assets.js';
 
 const $ = (id) => document.getElementById(id);
-const progress = (p) => { $('loadFill').style.width = `${Math.round(p * 100)}%`; return new Promise((r) => requestAnimationFrame(() => r())); };
+// yield so the bar can paint; the timeout keeps loading going in background tabs (rAF is paused there)
+const progress = (p) => {
+  $('loadFill').style.width = `${Math.round(p * 100)}%`;
+  return new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 60); });
+};
 
 async function waitFonts() {
   try {
@@ -132,11 +136,13 @@ async function init() {
   await progress(1);
 
   // ---------- UI ----------
-  $('loading').style.opacity = '0'; setTimeout(() => $('loading').classList.add('hidden'), 800);
-  $('start').classList.remove('hidden');
+  // the cover turns from a loading screen into the title screen
+  $('coverLoad').classList.add('hidden');
+  $('coverEnter').classList.remove('hidden');
   const touch = matchMedia('(pointer: coarse)').matches;
   $('startBtn').onclick = () => {
-    $('start').classList.add('hidden'); $('hud').classList.remove('hidden');
+    $('cover').classList.add('leaving'); setTimeout(() => $('cover').classList.add('hidden'), 1200);
+    $('hud').classList.remove('hidden');
     if (touch) { $('joy').classList.remove('hidden'); $('runBtn').classList.remove('hidden'); }
     ctrl.enabled = true; audio.start(); canvas.focus();
   };
@@ -211,6 +217,8 @@ async function init() {
       inside: place === '店內', umbrellaOpen: girl.open > 0.6,
       carProximity: npcs.taxiNear ? clamp(1 - Math.abs(npcs.taxiState.x - girl.pos.x) / 25, 0, 1) * (npcs.taxiNear / 9) : 0,
       storeDist: Math.hypot(girl.pos.x - 4.2, girl.pos.z + 6.5),
+      // distance to the dripping edge of the store's eave (z = -5.05, x in ±7.3)
+      eaveDist: Math.hypot(Math.max(0, Math.abs(girl.pos.x) - 7.3), girl.pos.z + 5.05),
     });
 
     // bubbles follow heads
@@ -241,10 +249,10 @@ async function init() {
     requestAnimationFrame(frame);
   }
   frame();
-  window.__scene = { scene, camera, renderer, girl, ctrl, npcs, refl, post, rain, street };
+  window.__scene = { scene, camera, renderer, girl, ctrl, npcs, refl, post, rain, street, audio };
 }
 
 init().catch((e) => {
   console.error(e);
-  $('loading').querySelector('.load-sub').textContent = '載入失敗：' + e.message;
+  $('loadText').textContent = '載入失敗：' + e.message;
 });

@@ -5,15 +5,17 @@ import { std, mesh, canvasTex } from './utils.js';
 
 const loader = new THREE.TextureLoader();
 let fabricBase = null;
+const fabricClones = [];
 function fabricImage() {
   if (!fabricBase) {
-    fabricBase = loader.load('assets/photo/fabric_navy.jpg', undefined, undefined, () => {
+    fabricBase = loader.load('assets/photo/fabric_navy.jpg', () => fabricClones.forEach((t) => { t.needsUpdate = true; }), undefined, () => {
       // fallback: procedural twill
       const c = canvasTex(256, 256, (g, w, h) => {
         g.fillStyle = '#0f1424'; g.fillRect(0, 0, w, h);
         for (let i = -h; i < w; i += 3) { g.strokeStyle = `rgba(80,95,140,${0.12 + Math.random() * 0.08})`; g.beginPath(); g.moveTo(i, h); g.lineTo(i + h, 0); g.stroke(); }
       }, { repeat: true });
       fabricBase.image = c.image; fabricBase.needsUpdate = true;
+      fabricClones.forEach((t) => { t.needsUpdate = true; });
     });
     fabricBase.colorSpace = THREE.SRGBColorSpace;
     fabricBase.wrapS = fabricBase.wrapT = THREE.RepeatWrapping;
@@ -23,7 +25,8 @@ function fabricImage() {
 }
 
 export function fabricMaterial(rx = 4, ry = 4, extra = {}) {
-  const t = fabricImage().clone(); t.repeat.set(rx, ry); t.needsUpdate = true;
+  const t = fabricImage().clone(); t.repeat.set(rx, ry);
+  if (t.image) t.needsUpdate = true; else fabricClones.push(t); // upload once the shared image arrives
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return new THREE.MeshPhysicalMaterial({
     map: t, color: new THREE.Color(1.55, 1.55, 1.7), roughness: 0.82, metalness: 0,

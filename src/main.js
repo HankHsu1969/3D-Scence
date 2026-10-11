@@ -27,22 +27,26 @@ async function waitFonts() {
   try {
     await Promise.race([
       Promise.all(['900 40px "Noto Sans JP"', '700 40px "Noto Sans JP"', '900 40px "Noto Serif JP"'].map((f) => document.fonts.load(f, 'あ漢ア'))),
-      new Promise((r) => setTimeout(r, 3500)),
+      new Promise((r) => setTimeout(r, 1500)),
     ]);
   } catch { /* fall back to system fonts */ }
 }
 
+const loadTimes = []; let lastT = 0;
+const T = (label) => { const n = performance.now(); loadTimes.push(`${label} ${Math.round(n - lastT)}ms`); lastT = n; };
+
 async function init() {
+  T('boot');
   await progress(0.05);
   const canvas = $('c');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-  const quality = { level: 'high', pr: Math.min(devicePixelRatio, 1.5) };
+  // fixed "smooth" quality: lower render scale, no shadow maps, lighter reflections and rain
+  const quality = { pr: 0.85 };
   renderer.setPixelRatio(quality.pr);
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = false;
   RectAreaLightUniformsLib.init();
 
   const scene = new THREE.Scene();
@@ -51,24 +55,31 @@ async function init() {
   camera.layers.enable(LAYER_NOREFLECT);
   camera.position.set(2, 2, 6);
 
+  // start downloading photo textures immediately; apply each one as soon as the scene exists
+  const photoQueue = []; let sceneReady = false;
+  const assetsP = loadPhotoAssets((name, tex) => (sceneReady ? applyPhotoAssets(scene, { [name]: tex }) : photoQueue.push([name, tex])));
+
   await waitFonts();
+  T('fonts');
   await progress(0.15);
-  const assetsP = loadPhotoAssets();
 
   const sky = createSky(); scene.add(sky);
   scene.environment = createEnvMap(renderer);
   scene.environmentIntensity = 0.45;
   scene.add(new THREE.HemisphereLight(0x2a3b5c, 0x07080c, 0.55));
 
-  const refl = new PlanarReflection(renderer, 0.5);
+  const refl = new PlanarReflection(renderer, 0.3);
   const street = buildStreet(scene, refl);
+  T('street');
   await progress(0.35);
   const door = buildStore(scene);
+  T('store');
   await progress(0.5);
   buildInterior(scene);
   const counter = buildCounter(scene);
+  T('interior');
   await progress(0.65);
-  const rain = new Rain(scene);
+  const rain = new Rain(scene, { count: 7000, splashCount: 1000 });
   const audio = new AudioFX();
 
   // speech bubbles
@@ -81,6 +92,7 @@ async function init() {
 
   const npcs = new NPCSystem(scene, rain, say);
   npcs.onBell = () => audio.bell();
+  T('npcs');
   await progress(0.8);
 
   // the heroine: long hair, cardigan, pleated skirt, clear vinyl umbrella
@@ -131,8 +143,15 @@ async function init() {
   };
   addEventListener('resize', resize); resize();
 
-  // photo textures generated for the scene (falls back to canvas art if missing)
-  try { applyPhotoAssets(scene, await assetsP); } catch (e) { console.warn('photo assets skipped', e); }
+  // photo textures that already arrived (the rest stream in later; canvas art shows until then)
+  T('setup');
+  sceneReady = true;
+  for (const [n, t] of photoQueue) { try { applyPhotoAssets(scene, { [n]: t }); } catch (e) { console.warn('photo asset', n, e); } }
+  await progress(0.9);
+  // compile shaders up front (in parallel where supported) so the first frame doesn't hitch
+  try { await renderer.compileAsync(scene, camera); } catch (e) { console.warn('shader precompile skipped', e); }
+  T('shaders');
+  console.info('[load]', loadTimes.join(' | '));
   await progress(1);
 
   // ---------- UI ----------
@@ -148,20 +167,10 @@ async function init() {
   };
   let toastT = 0;
   const toast = (msg, t = 2) => { $('toast').textContent = msg; $('toast').classList.add('show'); toastT = t; };
-  const setQuality = (lvl) => {
-    quality.level = lvl;
-    quality.pr = lvl === 'high' ? Math.min(devicePixelRatio, 1.5) : 0.85;
-    refl.scale = lvl === 'high' ? 0.5 : 0.3;
-    rain.streaks.geometry.instanceCount = lvl === 'high' ? 16000 : 7000;
-    renderer.shadowMap.enabled = lvl === 'high';
-    scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach((m) => (m.needsUpdate = true)); } });
-    resize(); toast(lvl === 'high' ? '畫質：高' : '畫質：流暢');
-  };
   let hudHidden = false, muted = false, paid = false;
   addEventListener('keydown', (e) => {
     if (e.code === 'KeyH') { hudHidden = !hudHidden; $('hud').classList.toggle('hidden', hudHidden); }
     if (e.code === 'KeyM') { muted = !muted; audio.setEnabled(!muted); toast(muted ? '音效：關' : '音效：開'); }
-    if (e.code === 'KeyQ') setQuality(quality.level === 'high' ? 'low' : 'high');
     if (e.code === 'KeyE' && nearCounter() && !paid) {
       paid = true; audio.register(); bag.visible = true;
       say(npcs.clerk, 'ありがとうございます！', 2.4); npcs.clerk.bowT = 1.0;
@@ -240,7 +249,7 @@ async function init() {
     post.render(t);
 
     fpsAcc += dt; fpsN++;
-    if (fpsAcc > 0.5) { $('hudStat').textContent = `${Math.round(fpsN / fpsAcc)} fps · ${quality.level === 'high' ? '高畫質' : '流暢'}`; fpsAcc = 0; fpsN = 0; }
+    if (fpsAcc > 0.5) { $('hudStat').textContent = `${Math.round(fpsN / fpsAcc)} fps`; fpsAcc = 0; fpsN = 0; }
   }
   // keep the loop alive even if one frame throws
   let errShown = false;

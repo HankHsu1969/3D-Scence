@@ -19,7 +19,7 @@ const faceCache = {}, faceFallbacks = {};
 function photoFace(key) {
   if (!faceCache[key]) {
     faceFallbacks[key] = [];
-    const t = new THREE.TextureLoader().load(`assets/photo/${key}.jpg`, undefined, undefined, () => faceFallbacks[key].forEach((f) => f()));
+    const t = new THREE.TextureLoader().load(`assets/photo/${key}.webp`, undefined, undefined, () => faceFallbacks[key].forEach((f) => f()));
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
     faceCache[key] = t;
   }

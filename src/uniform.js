@@ -8,7 +8,7 @@ let fabricBase = null;
 const fabricClones = [];
 function fabricImage() {
   if (!fabricBase) {
-    fabricBase = loader.load('assets/photo/fabric_navy.jpg', () => fabricClones.forEach((t) => { t.needsUpdate = true; }), undefined, () => {
+    fabricBase = loader.load('assets/photo/fabric_navy.webp', () => fabricClones.forEach((t) => { t.needsUpdate = true; }), undefined, () => {
       // fallback: procedural twill
       const c = canvasTex(256, 256, (g, w, h) => {
         g.fillStyle = '#0f1424'; g.fillRect(0, 0, w, h);

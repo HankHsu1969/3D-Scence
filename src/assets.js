@@ -8,11 +8,13 @@ const FILES = ['skyline', 'facade_apartment', 'facade_mixed', 'shutters', 'laund
 // real-world size (m) that one image covers, used to set texture repeat
 const SPAN = { facade_apartment: [16, 12], facade_mixed: [12, 9], shutters: [6.5, 2.8] };
 
-export function loadPhotoAssets() {
+// streams textures in; onEach(name, texture) fires as each one arrives so nothing blocks start-up
+export function loadPhotoAssets(onEach) {
   const loader = new THREE.TextureLoader();
   return Promise.all(FILES.map((name) => new Promise((resolve) => {
-    loader.load(`assets/photo/${name}.jpg`, (t) => {
-      t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+    loader.load(`assets/photo/${name}.webp`, (t) => {
+      t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+      try { onEach?.(name, t); } catch (e) { console.warn('photo asset', name, e); }
       resolve([name, t]);
     }, undefined, () => resolve([name, null]));
   }))).then((pairs) => Object.fromEntries(pairs));

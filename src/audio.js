@@ -52,7 +52,7 @@ export class AudioFX {
     const buf = ctx.createBuffer(2, n, sr), L = buf.getChannelData(0), R = buf.getChannelData(1);
     const one = (out, gain, k0) => {
       const a = amp * Math.pow(Math.random(), skew) * gain;   // mostly tiny, a few strong
-      const tc = rnd(tau[0], tau[1]) * 0.001 * sr, len = Math.floor(tc * 5);
+      const tc = rnd(tau[0], tau[1]) * 0.001 * sr, len = Math.floor(tc * 4);
       const c = rnd(bright[0], bright[1]);                   // one-pole lowpass: distance / surface
       let lp = 0, prev = 0;
       for (let i = 0; i < len; i++) {
@@ -90,7 +90,7 @@ export class AudioFX {
     tone.connect(this.rainLP); this.rainLP.connect(this.master);
     // far: very dense, darker grains (the body of the downpour)
     const far = this._gain(0.9); far.connect(this.rainBus);
-    this._loop(this._grains(9.3, 3200, { amp: 0.16, tau: [0.8, 3.2], bright: [0.12, 0.55] }), far);
+    this._loop(this._grains(7.9, 2400, { amp: 0.185, tau: [0.8, 3.0], bright: [0.12, 0.55] }), far);
     // mid: brighter grains on the street around you
     const mid = this._gain(0.7); mid.connect(this.rainBus);
     this._loop(this._grains(7.7, 1100, { amp: 0.24, tau: [0.5, 2.2], bright: [0.35, 0.95] }), mid, 1.9);

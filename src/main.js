@@ -15,6 +15,8 @@ import { NPCSystem } from './npcs.js';
 import { AudioFX } from './audio.js';
 import { createPost } from './post.js';
 import { loadPhotoAssets, applyPhotoAssets } from './assets.js';
+import { loadVRM } from './vrmrig.js';
+import { NPC_VRM, tintVRM } from './npcs.js';
 
 const $ = (id) => document.getElementById(id);
 // yield so the bar can paint; the timeout keeps loading going in background tabs (rAF is paused there)
@@ -56,6 +58,9 @@ async function init() {
   camera.layers.enable(LAYER_NOREFLECT);
   camera.position.set(2, 2, 6);
 
+  // the heroine's VRM downloads in parallel with scene construction
+  const heroP = loadVRM('assets/characters/heroine.vrm').catch((e) => { console.warn('heroine VRM unavailable, using procedural body', e); return null; });
+
   // start downloading photo textures immediately; apply each one as soon as the scene exists
   const photoQueue = []; let sceneReady = false;
   const assetsP = loadPhotoAssets((name, tex) => (sceneReady ? applyPhotoAssets(scene, { [name]: tex }) : photoQueue.push([name, tex])));
@@ -89,15 +94,18 @@ async function init() {
     const old = bubbles.find((b) => b.char === char); if (old) { old.el.remove(); bubbles.splice(bubbles.indexOf(old), 1); }
     const el = document.createElement('div'); el.className = 'bubble'; el.textContent = text; $('bubbles').appendChild(el);
     bubbles.push({ char, el, t: dur });
+    char.talkT = Math.min(dur, 1.4);
   };
 
   const npcs = new NPCSystem(scene, rain, say);
+  npcs.camera = camera;
   npcs.onBell = () => audio.bell();
   T('npcs');
   await progress(0.8);
 
   // the heroine: long hair, cardigan, pleated skirt, clear vinyl umbrella
-  const girl = new Character(scene, { bag: 'school', hairpin: true }, { umbrella: { kind: 'clear', radius: 0.52 } });
+  const heroVrm = await heroP;
+  const girl = new Character(scene, { bag: 'school', hairpin: true }, { umbrella: { kind: 'clear', radius: 0.52 }, vrm: heroVrm });
   girl.pos.set(1.6, 0, 1.2); girl.yaw = Math.PI; girl._prevYaw = girl.yaw;
   girl.onStep = (ankle, run) => {
     const p = ankle.getWorldPosition(new THREE.Vector3()); p.y = 0.01;
@@ -194,8 +202,8 @@ async function init() {
   const clock = new THREE.Clock();
   let t = 0, prevPlace = ctrl.place, fpsAcc = 0, fpsN = 0, hintShown = false;
   const tmp = new THREE.Vector3();
-  function tick() {
-    const dt = Math.min(clock.getDelta(), 0.05);
+  function tick(dtOverride) {
+    const dt = dtOverride ?? Math.min(clock.getDelta(), 0.05);
     t += dt;
     ctrl.update(dt);
     const place = ctrl.place;
@@ -269,7 +277,37 @@ async function init() {
     requestAnimationFrame(frame);
   }
   frame();
+
+  // NPCs start with procedural bodies and switch to VRM models as they stream in
+  (async () => {
+    for (const c of npcs.list) {
+      const cfg = NPC_VRM[c.kind];
+      if (!cfg) continue;
+      try {
+        const vrm = await loadVRM(cfg.url, { outline: false });
+        tintVRM(vrm, cfg.tint);
+        // NPCs skip shadow casting and the puddle-reflection pass to keep the frame cheap
+        vrm.scene.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.layers.set(LAYER_NOREFLECT); } });
+        c.swapBody(vrm);
+      } catch (e) { console.warn('NPC VRM', c.kind, e); }
+      await new Promise((r) => setTimeout(r, 30));
+    }
+  })();
   window.__scene = { scene, camera, renderer, girl, ctrl, npcs, refl, post, rain, street, audio };
+  // ?debug: __snap(name) renders a frame and saves it through the dev server (works while the pane is hidden)
+  if (location.search.includes('debug')) {
+    // step the simulation manually (rAF is paused while the preview pane is hidden)
+    import('./vrmrig.js').then((m) => { window.__loadVRM = m.loadVRM; });
+    window.__advance = (sec, step = 1 / 30) => { for (let i = 0; i < sec / step; i++) tick(step); };
+    window.__snap = async (name = 'shot', w = 900) => {
+      post.render(performance.now() / 1000);
+      const c = renderer.domElement, k = document.createElement('canvas');
+      k.width = w; k.height = Math.round((w * c.height) / c.width);
+      k.getContext('2d').drawImage(c, 0, 0, k.width, k.height);
+      await fetch(`/__shot?name=${name}`, { method: 'POST', body: k.toDataURL('image/jpeg', 0.8) });
+      return name;
+    };
+  }
 }
 
 init().catch((e) => {

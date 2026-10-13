@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { createHumanoid, deformSkirt } from './humanoid.js';
 import { Umbrella } from './umbrella.js';
+import { VRMRig } from './vrmrig.js';
 import { clamp, lerp, smoothstep, damp, canvasTex, noReflect } from './utils.js';
 
 const V1 = new THREE.Vector3(), V2 = new THREE.Vector3(), V3 = new THREE.Vector3(), V4 = new THREE.Vector3();
@@ -56,11 +57,14 @@ function blob() {
 }
 
 export class Character {
-  constructor(scene, opts = {}, { umbrella = null, mode = 'walk' } = {}) {
+  constructor(scene, opts = {}, { umbrella = null, mode = 'walk', vrm = null } = {}) {
     this.scene = scene;
-    this.h = createHumanoid(opts);
+    if (vrm) { this.vrm = vrm; this.h = new VRMRig(vrm); } // real rigged model
+    else this.h = createHumanoid(opts);                      // procedural fallback
     scene.add(this.h.root);
     if (this.h.hair) scene.add(this.h.hair.mesh);
+    this.attached = [];
+    this.talkT = 0; this.openSmooth = 1;
     this.umbrella = umbrella ? new Umbrella(umbrella) : null;
     if (this.umbrella) { scene.add(this.umbrella.group); this.umbrella.group.traverse((o) => { if (o.isMesh) o.castShadow = true; }); }
     this.blob = blob(); scene.add(this.blob);
@@ -77,13 +81,39 @@ export class Character {
     this._prevYaw = 0;
   }
 
-  attachToHand(side, obj, pos = [0, -0.07, 0.02], rot = [0, 0, 0]) {
+  attachToHand(side, obj, pos = [0, -0.07, 0.02], rot = [0, 0, 0], vrmPos = null) {
+    (this._attachLog ||= []).push(['attachToHand', [side, obj, pos, rot, vrmPos]]);
+    if (this.vrm) {
+      if (vrmPos) pos = vrmPos; // follow the grip point in world space, oriented with the body
+      this.scene.add(obj); this.attached.push({ side: side === 'L' ? 'left' : 'right', obj, pos: new THREE.Vector3(...pos), rot: new THREE.Euler(...rot) });
+      if (side === 'L' && obj.userData.carry !== false) this.carry = true;
+      return obj;
+    }
     const hand = this.h.arms[side].hand;
     obj.position.set(...pos); obj.rotation.set(...rot); hand.add(obj);
     return obj;
   }
 
+  // props held against the chest (e.g. a magazine); vrmPos is used on VRM bodies
+  attachToChest(obj, pos, rot = [0, 0, 0], vrmPos = pos) {
+    (this._attachLog ||= []).push(['attachToChest', [obj, pos, rot, vrmPos]]);
+    obj.position.set(...(this.vrm ? vrmPos : pos)); obj.rotation.set(...rot);
+    this.h.chest.add(obj);
+    return obj;
+  }
+
+  // swap the procedural body for a loaded VRM, keeping state and re-attaching props
+  swapBody(vrm) {
+    this.scene.remove(this.h.root);
+    if (this.h.hair) this.scene.remove(this.h.hair.mesh);
+    for (const a of this.attached) this.scene.remove(a.obj);
+    this.vrm = vrm; this.h = new VRMRig(vrm); this.scene.add(this.h.root);
+    const log = this._attachLog || []; this._attachLog = []; this.attached = []; this.carry = false;
+    for (const [fn, args] of log) this[fn](...args);
+  }
+
   update(dt, t) {
+    if (this.vrm) return this._updateVRM(dt);
     const h = this.h, L = h.L;
     this.time += dt;
     const root = h.root;
@@ -201,29 +231,9 @@ export class Character {
     } else if (this.mode === 'walk' || this.mode === 'idle' || this.mode === 'phone') freeArm('R', -1);
     root.updateMatrixWorld(true);
 
-    // ---------- umbrella placement ----------
     if (this.umbrella) {
-      const u = this.umbrella;
       this.open = damp(this.open, this.wantOpen ? 1 : 0, 4.5, dt);
-      u.update(this.open);
-      const grip = h.arms.R.hand.localToWorld(V1.set(0, -0.04, 0.01)).clone();
-      const fwd = V2.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)).clone();
-      const right = new THREE.Vector3(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
-      const top = this.pos.clone().add(V3.set(0, 1.96 * h.scale, 0)).addScaledVector(fwd, 0.0 + 0.16 * runK * amp + 0.05 * amp).addScaledVector(right, 0.07);
-      if (this.mode === 'ride') top.addScaledVector(fwd, 0.1);
-      const openDir = top.sub(grip).normalize();
-      const closedDir = fwd.clone().multiplyScalar(0.42).add(V4.set(0, -1, 0)).normalize();
-      const dir = closedDir.lerp(openDir, os).normalize();
-      // gentle sway
-      dir.x += Math.sin(this.time * 1.3) * 0.015 * (0.4 + amp); dir.z += Math.cos(this.time * 1.1) * 0.015 * (0.4 + amp); dir.normalize();
-      const center = this.pos.clone().add(V3.set(0, grip.y - this.pos.y, 0));
-      const xd = center.sub(grip); xd.addScaledVector(dir, -xd.dot(dir));
-      if (xd.lengthSq() < 1e-6) xd.set(1, 0, 0);
-      xd.normalize();
-      const zd = new THREE.Vector3().crossVectors(xd, dir);
-      M1.makeBasis(xd, dir, zd);
-      u.group.quaternion.setFromRotationMatrix(M1);
-      u.group.position.copy(grip);
+      this._placeUmbrella(h.arms.R.hand.localToWorld(V1.set(0, -0.04, 0.01)).clone(), runK, amp, os, 1.96 * h.scale);
     }
 
     // ---------- hair & shadow ----------
@@ -233,6 +243,51 @@ export class Character {
     }
     this.blob.position.set(this.pos.x, 0.012, this.pos.z);
     this.blob.scale.setScalar(h.scale * (1 - 0.15 * (hipY - L.hipY) / 0.05));
+  }
+
+  // shared by both rigs: orient the umbrella from the grip toward a point above the head
+  _placeUmbrella(grip, runK, amp, os, topH) {
+    const u = this.umbrella;
+    u.update(this.open);
+    const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    const right = new THREE.Vector3(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
+    const top = this.pos.clone().add(V3.set(0, topH, 0)).addScaledVector(fwd, 0.16 * runK * amp + 0.05 * amp).addScaledVector(right, 0.07);
+    if (this.mode === 'ride') top.addScaledVector(fwd, 0.1);
+    const openDir = top.sub(grip).normalize();
+    const closedDir = fwd.clone().multiplyScalar(0.42).add(V4.set(0, -1, 0)).normalize();
+    const dir = closedDir.lerp(openDir, os).normalize();
+    dir.x += Math.sin(this.time * 1.3) * 0.015 * (0.4 + amp); dir.z += Math.cos(this.time * 1.1) * 0.015 * (0.4 + amp); dir.normalize();
+    const xd = this.pos.clone().setY(grip.y).sub(grip); xd.addScaledVector(dir, -xd.dot(dir));
+    if (xd.lengthSq() < 1e-6) xd.set(1, 0, 0);
+    xd.normalize();
+    const zd = new THREE.Vector3().crossVectors(xd, dir);
+    M1.makeBasis(xd, dir, zd);
+    u.group.quaternion.setFromRotationMatrix(M1);
+    u.group.position.copy(grip);
+  }
+
+  _updateVRM(dt) {
+    this.time += dt;
+    this.talkT = Math.max(0, this.talkT - dt);
+    const yawRate = (this.yaw - this._prevYaw) / Math.max(dt, 1e-4); this._prevYaw = this.yaw;
+    this.yawVel = damp(this.yawVel, clamp(yawRate, -6, 6), 8, dt);
+    const sp = this.mode === 'walk' ? this.speed : 0;
+    const runK0 = clamp((sp - 1.7) / 1.9, 0, 1);
+    this.phase += (sp / (lerp(1.3, 2.35, runK0) * this.h.scale)) * Math.PI * 2 * dt;
+    if (this.umbrella) this.open = damp(this.open, this.wantOpen ? 1 : 0, 4.5, dt);
+    this.openSmooth = smoothstep(0.15, 0.85, this.open);
+    this.lookT -= dt;
+    if (this.lookT <= 0) { this.lookT = 2 + Math.random() * 4; this.lookTarget = (Math.random() - 0.5) * (sp > 0.6 ? 0.4 : 1.0); }
+    this.lookYaw = damp(this.lookYaw, this.lookTarget, 3, dt);
+    const { runK, amp, hipLift } = this.h.animate(this, dt, this.lod || 0);
+    if (this.umbrella) this._placeUmbrella(this.h.grip('right'), runK, amp, this.openSmooth, this.h.height + 0.42);
+    const yq = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+    for (const a of this.attached) {
+      a.obj.position.copy(this.h.grip(a.side)).add(a.pos.clone().applyQuaternion(yq));
+      a.obj.quaternion.copy(yq).multiply(new THREE.Quaternion().setFromEuler(a.rot));
+    }
+    this.blob.position.set(this.pos.x, 0.012, this.pos.z);
+    this.blob.scale.setScalar(this.h.scale * (1 - 0.15 * hipLift / 0.05));
   }
 
   // world positions of rib tips (for drips)

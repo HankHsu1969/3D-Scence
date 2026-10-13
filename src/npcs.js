@@ -21,6 +21,38 @@ const OUTFITS = {
   cyclist: { scale: 1.02, face: 'woman', hair: { style: 'bob', color: '#24160f' }, top: { kind: 'coat', color: '#8a9a6a', inner: '#fff' }, bottom: { kind: 'pants', color: '#2e3340' }, shoes: '#3a2a20' },
 };
 
+// VRM body for each NPC kind (CC0 VRoid sample models, textures compressed for the web).
+// Missing files are skipped and that NPC keeps its procedural body.
+const M = (f, tint = null) => ({ url: `assets/characters/${f}.vrm`, tint });
+// tint multiplies the colour of materials whose name contains the key (Tops, Bottoms, Onepice, HAIR)
+export const NPC_VRM = {
+  clerk: M('npc_male_a', { Tops: '#86d8cc' }),
+  reader: M('npc_male_b', { Tops: '#d89090' }),
+  phoneGuy: M('npc_male_b', { Tops: '#9aa2b2', Bottoms: '#5c6470' }),
+  salaryman: M('npc_male_a', { Tops: '#8a93a8', HAIR: '#4a4440' }),
+  student: M('npc_male_b'),
+  atm: M('npc_female_a'),
+  browser: M('npc_female_b', { Tops: '#b8c8e4' }),
+  officeLady: M('npc_female_c', { Tops: '#e4d2aa', Bottoms: '#5a5050', HAIR: '#8a5a34' }),
+  youngWoman: M('npc_female_a', { Onepice: '#c4b4dc' }),
+  grandma: M('npc_female_c', { Tops: '#a68cb6', Bottoms: '#54485c', HAIR: '#d4d4d4' }),
+  cyclist: M('npc_female_b', { Tops: '#cadab2' }),
+};
+
+export function tintVRM(vrm, tint) {
+  if (!tint) return;
+  vrm.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      const key = Object.keys(tint).find((k) => m.name && m.name.includes(k));
+      if (!key) continue;
+      const c = new THREE.Color(tint[key]);
+      m.color?.multiply(c);
+      m.shadeColorFactor?.multiply(c);
+    }
+  });
+}
+
 export class NPCSystem {
   constructor(scene, rain, say) {
     this.scene = scene; this.rain = rain; this.say = say;
@@ -32,7 +64,7 @@ export class NPCSystem {
     const reader = this.spawn('reader', -3.6, -7.5, 0, null, 'read');
     const mt = magazineAtlas(); const tex = mt.clone(); tex.needsUpdate = true; tex.repeat.set(0.25, 0.5); tex.offset.set(0.25, 0.5);
     const mag = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.28, 0.01), [std(0xf4f0e8, 0.8), std(0xf4f0e8, 0.8), std(0xf4f0e8, 0.8), std(0xf4f0e8, 0.8), std(0xffffff, 0.5, 0, { map: tex }), std(0xf8f6f0, 0.9)]);
-    mag.position.set(0, -0.02, 0.27); mag.rotation.x = 0.64; reader.h.chest.add(mag);
+    reader.attachToChest(mag, [0, -0.02, 0.27], [0.64, 0, 0], [0, -0.12, 0.3]);
     const atm = this.spawn('atm', 5.85, -7.85, Math.PI / 2, null, 'atm');
     atm.reachT = 0;
     const browser = this.spawn('browser', -2, -14.5, Math.PI / 2, null, 'walk');
@@ -43,7 +75,8 @@ export class NPCSystem {
     const ph = new THREE.Group();
     ph.add(new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.15, 0.008), std(0x111111, 0.3, 0.5)));
     const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.066, 0.135), glow(0xbfe0ff, 2.2)); scr.position.z = -0.005; scr.rotation.y = Math.PI; ph.add(scr);
-    phone.attachToHand('L', ph, [0, -0.07, 0.03], [0.3, 0, 0]);
+    ph.userData.carry = false;
+    phone.attachToHand('L', ph, [0, -0.07, 0.03], [0.3, 0, 0], [0, 0.03, 0.02]);
     phone.talkT = 4;
 
     // --- street walkers ---
@@ -111,7 +144,20 @@ export class NPCSystem {
 
     this.updateBike(dt, pp);
     this.updateTaxi(dt, pp);
-    for (const c of this.list) c.update(dt, t);
+    // level of detail: hide VRM bodies far from the camera, simplify mid-range ones
+    const cam = this.camera;
+    for (const c of this.list) {
+      if (c.vrm && cam) {
+        const d = c.pos.distanceTo(cam.position);
+        const visible = d < 24;
+        c.h.root.visible = visible;
+        if (c.umbrella) c.umbrella.group.visible = visible;
+        c.blob.visible = visible;
+        c.lod = d > 12 ? 1 : 0;
+        if (!visible) { c.lod = 2; c.skipT = (c.skipT || 0) + dt; if (c.skipT < 0.25) continue; c.skipT = 0; }
+      }
+      c.update(dt, t);
+    }
   }
 
   patrol(c, dt) {

@@ -133,6 +133,11 @@ export function buildStore(scene) {
   shadowSpot.shadow.bias = -0.0008; shadowSpot.shadow.normalBias = 0.03;
   shadowSpot.shadow.camera.near = 1; shadowSpot.shadow.camera.far = 22;
   g.add(shadowSpot, shadowSpot.target);
+  // VRM (MToon) characters ignore RectAreaLights, so the deep end of the store gets point fills
+  for (const [x, z] of [[-3.2, -12.8], [3.0, -12.2]]) {
+    const fill = new THREE.PointLight(0xfff1dc, 9, 9, 1.5);
+    fill.position.set(x, 2.75, z); g.add(fill);
+  }
 
   // --- pylon sign ---
   const pyl = new THREE.Group(); pyl.position.set(8.1, 0, -4.9); g.add(pyl);

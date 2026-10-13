@@ -16,6 +16,18 @@ const types = {
 };
 
 http.createServer((req, res) => {
+  // dev helper: POST a canvas data-URL to /__shot?name=x to save it under .shots/ (gitignored)
+  if (req.method === 'POST' && req.url.startsWith('/__shot')) {
+    const name = (new URL(req.url, 'http://x').searchParams.get('name') || 'shot').replace(/[^\w-]/g, '');
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      fs.mkdirSync(path.join(root, '.shots'), { recursive: true });
+      fs.writeFileSync(path.join(root, '.shots', `${name}.jpg`), Buffer.from(body.split(',')[1] || '', 'base64'));
+      res.writeHead(200); res.end('ok');
+    });
+    return;
+  }
   let p = decodeURIComponent(req.url.split('?')[0]);
   if (p.endsWith('/')) p += 'index.html';
   const file = path.join(root, path.normalize(p));
